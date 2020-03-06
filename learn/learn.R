@@ -17,19 +17,25 @@ runTests <- function()
    test_getNodeLabels()
    test_getEdgeTypes()
    test_getNodeTable()
+   test_getEdgeTable()
 
 } # runTests
 #------------------------------------------------------------------------------------------------------------------------
 query <- function(s)
 {
     suppressMessages(
-        tibble <- call_neo4j(s, con)
+        x <- call_neo4j(s, con)
         )
 
-    if(length(tibble) == 0)
+    if(length(x) == 0)
        return(NULL)
 
-    return(as.data.frame(tibble[[1]]))
+    tbls <- lapply(x, as.data.frame)
+    #return(as.data.frame(tibble[[1]]))
+    if(length(tbls) == 1)
+      return(tbls[[1]])
+
+    return(tbls)
 
 } # query
 #------------------------------------------------------------------------------------------------------------------------
@@ -53,6 +59,9 @@ loadCSV.northwind <- function()
            con = con, header = TRUE, periodic_commit = 50,
            as = "row", on_load = on_load_query)
 
+  query("match (n) set n.id = id(n)")
+
+
 } # loadCSV.northwind
 #------------------------------------------------------------------------------------------------------------------------
 loadCSV.artists <- function()
@@ -65,6 +74,7 @@ loadCSV.artists <- function()
            con = con, header = FALSE, periodic_commit = 50,
            as = "line", on_load=load.query)
 
+  query("match (n) set n.id = id(n)")
 
 } # loadCSV.artists
 #------------------------------------------------------------------------------------------------------------------------
@@ -98,6 +108,7 @@ runCypherFile <- function(filename)
      result <- send_cypher(filename, con, type = c("row"), output = "r", include_stats = TRUE, meta = FALSE)
      )
 
+  query("match (n) set n.id = id(n)")
   invisible(result)
 
 } # runCypherFile
@@ -165,8 +176,7 @@ test_getEdgeTypes <- function()
 #------------------------------------------------------------------------------------------------------------------------
 getNodeTable <- function()
 {
-
-   query("match (n) set n.id = id(n)")
+   #query("match (n) set n.id = id(n)")
    labels <- getNodeLabels()
 
    build.label.table <- function(label){
@@ -209,4 +219,45 @@ test_getNodeTable <- function()
    checkEquals(colnames(tbl.nodes), c("id", "label", "born", "name", "released", "title"))
 
 } # test_getNodeTable
+#------------------------------------------------------------------------------------------------------------------------
+getEdgeTable <- function(directed=TRUE)
+{
+   x <- query("match (m)-[r]-(n) return m, n, type(r)")
+
+   tbl <- data.frame(a=x$m$id, b=x$n$id, type=x$type$value, stringsAsFactors=FALSE)
+   sigs <- vector("character", nrow(tbl))
+
+   if(directed){
+     for(r in seq_len(nrow(tbl))){
+        ordered.nodes <- sort(c(tbl[r, "a"], tbl[r, "b"]))
+        sigs[r] <- sprintf("%s:%d:%d", tbl[r, "type"], ordered.nodes[1], ordered.nodes[2])
+        } # for r
+     deleters <- which(duplicated(sigs))
+     if(length(deleters) > 0)
+         tbl <- tbl[-deleters,]
+     } # if directed
+
+   return(tbl)
+
+} # getEdgeTable
+#------------------------------------------------------------------------------------------------------------------------
+test_getEdgeTable <- function()
+{
+   printf("--- test_getEdgeTable")
+
+   clear.db()
+   checkEquals(nodeCount(), 0)
+   checkEquals(directedEdgeCount(), 0)
+   runCypherFile("createTwoActors.cypher")
+
+   tbl.edges <- getEdgeTable(directed=TRUE)
+
+   checkEquals(dim(tbl.edges), c(3, 3))
+   checkEquals(colnames(tbl.edges), c("a", "b", "type"))
+
+   tbl.edges <- getEdgeTable(directed=FALSE)
+   checkEquals(dim(tbl.edges), c(6, 3))
+   checkEquals(colnames(tbl.edges), c("a", "b", "type"))
+
+} # test_getEdgeTable
 #------------------------------------------------------------------------------------------------------------------------
