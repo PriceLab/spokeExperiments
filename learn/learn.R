@@ -10,17 +10,6 @@ if(!exists("con")){
    }
 stopifnot("Neo4JAPI" %in% class(con))
 #------------------------------------------------------------------------------------------------------------------------
-runTests <- function()
-{
-   test_query()
-   test_runCypherFile()
-   test_getNodeLabels()
-   test_getEdgeTypes()
-   test_getNodeTable()
-   test_getEdgeTable()
-
-} # runTests
-#------------------------------------------------------------------------------------------------------------------------
 query <- function(s)
 {
     suppressMessages(
@@ -28,7 +17,7 @@ query <- function(s)
         )
 
     if(length(x) == 0)
-       return(NULL)
+       return(data.frame())
 
     tbls <- lapply(x, as.data.frame)
     #return(as.data.frame(tibble[[1]]))
@@ -38,31 +27,6 @@ query <- function(s)
     return(tbls)
 
 } # query
-#------------------------------------------------------------------------------------------------------------------------
-test_query <- function()
-{
-   printf("--- test_query")
-   tbl.out <- query("match(n) return count(n)")
-   checkTrue(tbl.out$value >= 0)
-
-} # test_query
-#------------------------------------------------------------------------------------------------------------------------
-loadCSV.northwind <- function()
-{
-  on_load_query <- 'CREATE (n:Product)
-    SET n = row,
-    n.unitPrice = toFloat(row.unitPrice),
-    n.unitsInStock = toInteger(row.unitsInStock), n.unitsOnOrder = toInteger(row.unitsOnOrder),
-    n.reorderLevel = toInteger(row.reorderLevel), n.discontinued = (row.discontinued <> "0");'
-
-  load_csv(url = "http://data.neo4j.com/northwind/products.csv",
-           con = con, header = TRUE, periodic_commit = 50,
-           as = "row", on_load = on_load_query)
-
-  query("match (n) set n.id = id(n)")
-
-
-} # loadCSV.northwind
 #------------------------------------------------------------------------------------------------------------------------
 loadCSV.artists <- function()
 {
@@ -90,11 +54,16 @@ nodeCount <- function()
 
 } # nodeCount
 #------------------------------------------------------------------------------------------------------------------------
-directedEdgeCount <- function()
+edgeCount <- function(directed=TRUE)
 {
-  return(query("match ()-[r]->() return count(r)")$value)
+  queryString <- "match ()-[r]->() return count(r)"
 
-} # nodeCount
+  if(!directed)
+     queryString <- "match ()-[r]-() return count(r)"
+
+  return(query(queryString)$value)
+
+} # edgeCount
 #------------------------------------------------------------------------------------------------------------------------
 fullGraph <- function()
 {
@@ -113,34 +82,13 @@ runCypherFile <- function(filename)
 
 } # runCypherFile
 #------------------------------------------------------------------------------------------------------------------------
-test_runCypherFile <- function()
-{
-  printf("--- test_runCypherFile")
-
-  clear.db()
-  checkEquals(nodeCount(), 0)
-  checkEquals(directedEdgeCount(), 0)
-
-  runCypherFile("createTwoActors.cypher")
-  checkEquals(nodeCount(), 4)
-  checkEquals(directedEdgeCount(), 3)
-
-} # test_runCypherFile
-#------------------------------------------------------------------------------------------------------------------------
-test_exampleGraph_3.3.1 <- function()
-{
-  printf("--- test_exampleGraph_3.3.1")
-  clear.db()
-  runCypherFile("exampleGraph-331.cypher")
-  nodeCount()
-  directedEdgeCount()
-
-} # test_exampleGraph_3.3.1
-#------------------------------------------------------------------------------------------------------------------------
 getNodeLabels <- function()
 {
-   tbl <- query("match (n) return distinct labels(n)")
-   labels <- sort(unique(unlist(lapply(seq_len(nrow(tbl)), function(r) paste(tbl[r,], collapse=":")))))
+   tbl.raw <- query("match (n) return distinct labels(n)")
+   if(nrow(tbl.raw) == 0)
+       return(c())
+
+   labels <- sort(unique(unlist(lapply(seq_len(nrow(tbl.raw)), function(r) paste(tbl.raw[r,], collapse=":")))))
    labels <- gsub(":NA", "", labels, fixed=TRUE)
    labels <- paste(":", labels, sep="")
 
@@ -148,35 +96,24 @@ getNodeLabels <- function()
 
 } # getNodeLabels
 #------------------------------------------------------------------------------------------------------------------------
-test_getNodeLabels <- function()
-{
-   printf("--- test_getNodeLabels")
-
-   clear.db();
-   runCypherFile("createTwoActors.cypher")
-   checkEquals(getNodeLabels(), c(":Movie", ":Person:Actor", ":Person:Director"))
-
-} # test_getNodeLabels
-#------------------------------------------------------------------------------------------------------------------------
 getEdgeTypes <- function()
 {
-   sort(query("MATCH (n)-[r]-(m) RETURN distinct type(r)")$value)
+   tbl.raw <- query("MATCH (n)-[r]-(m) RETURN distinct type(r)")
+   if(nrow(tbl.raw) == 0)
+       return(c())
+
+   sort(tbl.raw$value)
 
 } # getNodeLabels
 #------------------------------------------------------------------------------------------------------------------------
-test_getEdgeTypes <- function()
-{
-   printf("--- test_getEdgeTypes")
-
-   clear.db();
-   runCypherFile("createTwoActors.cypher")
-   checkEquals(getEdgeTypes(), c("ACTED_IN", "DIRECTED"))
-
-} # test_getEdgeTypes
-#------------------------------------------------------------------------------------------------------------------------
 getNodeTable <- function()
 {
-   #query("match (n) set n.id = id(n)")
+
+   # add id property to every node if not already present
+   if(nrow(query("MATCH (n) return(n.id)")) == 0){
+      query("match (n) set n.id = id(n)")
+      }
+
    labels <- getNodeLabels()
 
    build.label.table <- function(label){
@@ -205,21 +142,6 @@ getNodeTable <- function()
 
 } # getNodeTable
 #------------------------------------------------------------------------------------------------------------------------
-test_getNodeTable <- function()
-{
-   printf("--- test_getNodeTable")
-
-   clear.db()
-   checkEquals(nodeCount(), 0)
-   checkEquals(directedEdgeCount(), 0)
-   runCypherFile("createTwoActors.cypher")
-
-   tbl.nodes <- getNodeTable()
-   checkEquals(dim(tbl.nodes), c(4, 6))
-   checkEquals(colnames(tbl.nodes), c("id", "label", "born", "name", "released", "title"))
-
-} # test_getNodeTable
-#------------------------------------------------------------------------------------------------------------------------
 getEdgeTable <- function(directed=TRUE)
 {
    x <- query("match (m)-[r]-(n) return m, n, type(r)")
@@ -240,24 +162,4 @@ getEdgeTable <- function(directed=TRUE)
    return(tbl)
 
 } # getEdgeTable
-#------------------------------------------------------------------------------------------------------------------------
-test_getEdgeTable <- function()
-{
-   printf("--- test_getEdgeTable")
-
-   clear.db()
-   checkEquals(nodeCount(), 0)
-   checkEquals(directedEdgeCount(), 0)
-   runCypherFile("createTwoActors.cypher")
-
-   tbl.edges <- getEdgeTable(directed=TRUE)
-
-   checkEquals(dim(tbl.edges), c(3, 3))
-   checkEquals(colnames(tbl.edges), c("a", "b", "type"))
-
-   tbl.edges <- getEdgeTable(directed=FALSE)
-   checkEquals(dim(tbl.edges), c(6, 3))
-   checkEquals(colnames(tbl.edges), c("a", "b", "type"))
-
-} # test_getEdgeTable
 #------------------------------------------------------------------------------------------------------------------------
