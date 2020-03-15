@@ -1,20 +1,6 @@
 #!/bin/bash
 
-NAME=transport2
-# docker stop $NAME
-# docker rm $NAME
-
-# the data directory must contain two neo4j-specific subdirectories: databases and dbms
-# when used here, docker apparewntly adds attributes to the $DATA directory
-# i had thought this was a problem, but it is not
-#
-# <neo4j-home>/data: this is where the database datastore is kept
-# csv files to import must be in <neo4j-home>/import
-# where the docker image has NEO4J_HOME
-#   NEO4J_HOME=/var/lib/neo4j
-#
-
-docker run --name=$NAME \
+docker run --name=transport2 \
     --detach \
     --publish=7476:7474 --publish=7689:7687 \
     --volume=/Users/paul/github/spokeExperiments/learn/transport2/import:/var/lib/neo4j/import \
