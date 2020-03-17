@@ -7,10 +7,22 @@ if(!exists("rcy")){
   title <- "transport2"
   rcy <- RCyjs(title=title, quiet=TRUE)
   setBrowserWindowTitle(rcy, title)
+  basicViz()
   }
 #------------------------------------------------------------------------------------------------------------------------
 # make sure the northwind data has been loaded
 stopifnot(nodeCount() == 12)
+#------------------------------------------------------------------------------------------------------------------------
+runTests <- function()
+{
+   test_dijkstra.shortestPath()
+   test_aStar.shortestPath()
+   test_apsp()
+   test_singleSourceShortestPath()
+   test_minimalSpanningTree()
+   test_randomWalk()
+
+} # runTests
 #------------------------------------------------------------------------------------------------------------------------
 basicViz <- function()
 {
@@ -207,7 +219,6 @@ test_singleSourceShortestPath <- function()
    tbl.sssp <- singleSourceShortestPath(sourceName="Rotterdam")
    checkEquals(dim(tbl.sssp), c(12,2))
    checkEquals(tbl.sssp[1, "distance"], 0)
-   checkEquals(tbl.sssp["Doncaster", "distance"], 528)
    checkEquals(as.list(tbl.sssp[12,]), list(destination="Doncaster", distance=528))
 
 } # test_singleSourceShortestPath
@@ -232,11 +243,9 @@ minimalSpanningTree <- function(sourceName)
                "WITH DISTINCT rel AS rel",
                "RETURN startNode(rel).id AS source, endNode(rel).id AS destination, rel.distance AS cost")
    x2 <- query(s2)
-
-   tbl.edges <- getEdgeTable()
-   tbl.minst <- subset(tbl.edges, interaction=="MINST")
-   rownames(tbl.minst) <- NULL
-
+   tbl.minst <- data.frame(source=x2$source[,1], destination=x2$destination[,1], cost=x2$cost[,1],
+                           stringsAsFactors=FALSE)
+    # get rid of those minst labeled edges
    query("MATCH (m)-[rel:MINST]-(n) delete rel")
 
    return(tbl.minst)
@@ -248,10 +257,63 @@ test_minimalSpanningTree <- function()
    printf("--- test_minimalSpanningTree")
 
    tbl.minst <- minimalSpanningTree(sourceName="Amsterdam")
-   checkEquals(dim(tbl.minst), c(11,4))
+   checkEquals(dim(tbl.minst), c(11,3))
    checkEquals(dim(getEdgeTable()), c(15, 4))   # make sure the MINST edges are gone
 
+   clearSelection(rcy)
+   selectNodes(rcy, tbl.minst$source[1])
+   for(i in seq_len(nrow(tbl.minst))){
+      selectNodes(rcy, tbl.minst$destination[i])
+      Sys.sleep(1)
+      } # for i
+
 } # test_minimalSpanningTree
+#------------------------------------------------------------------------------------------------------------------------
+randomWalk <- function(startingCity, numberOfHops, numberOfWalks=1)
+{
+   s <- paste(sprintf("MATCH (source:Place {id: '%s'})", startingCity),
+              sprintf("CALL algo.randomWalk.stream(id(source), %d, %d) YIELD nodeIds",
+                      numberOfHops, numberOfWalks),
+              "UNWIND algo.getNodesById(nodeIds) AS place RETURN place.id AS place")
+
+   x <- query(s)
+   x <- x[, "value"]
+
+   if(numberOfWalks > 1){  # cypher returns a single list, all path hops included. break it up.
+      factors <- unlist(lapply(seq_len(numberOfWalks), function(i) rep(i, numberOfHops+1)))
+      indices <- seq_len(length(x))
+      x <- split(x, factors)
+      }
+
+   return(x)
+
+} # randomWalk
+#------------------------------------------------------------------------------------------------------------------------
+test_randomWalk <- function()
+{
+   printf("--- test_randomWalk")
+
+   list.path <- randomWalk("Amsterdam", 5, 1)
+   checkEquals(length(list.path), 6)
+   checkEquals(list.path[1], "Amsterdam")
+
+   list.paths <- randomWalk("Amsterdam", 4, 2)
+   checkEquals(length(list.paths), 2)
+   path.1 <- list.paths[[1]]
+   path.2 <- list.paths[[2]]
+   checkEquals(path.1[1], "Amsterdam")
+   checkEquals(path.2[1], "Amsterdam")
+
+   list.paths <- randomWalk("Gouda", 5, 8)
+   checkEquals(length(list.paths), 8)
+
+   for(path in list.paths){
+      checkEquals(length(path), 6)
+      checkEquals(path[1], "Gouda")
+      } # for path
+
+
+} # test_randomWalk
 #------------------------------------------------------------------------------------------------------------------------
 if(!interactive())
     runTests()
